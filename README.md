@@ -4,6 +4,7 @@
 
 ### *Autonomous Multi-Agent Theoretical Physics & Hypothesis Engine*
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![Ollama](https://img.shields.io/badge/Ollama-Local_Inference-black?logo=ollama&logoColor=white)](https://ollama.com/)
 [![SymPy](https://img.shields.io/badge/Verification-SymPy_CAS-green?logo=scipy&logoColor=white)](https://www.sympy.org/)
@@ -16,9 +17,9 @@
 
 [Architecture](#-architecture) •
 [Agent Council](#-the-agent-council) •
-[Quickstart](#-quickstart) •
-[Verification Sandbox](#-mathematical-verification-sandbox) •
-[Preprint Drafter](#-automated-latex-generation)
+[Google Colab](#-running-on-google-colab-free-gpu) •
+[Quickstart](#-quickstart-local) •
+[Execution](#-execution)
 
 ---
 
@@ -28,11 +29,11 @@
 
 Most LLM-based research frameworks default to plausible-sounding speculation without empirical grounding. **Discovery_AI** addresses this by coupling local multi-agent cognition with strict validation gates:
 
-* **Adversarial Red-Teaming**: Hypotheses must supply an empirical **Kill Condition** tested by `breaker_ai`.
-* **Symbolic Tensor & Limit Sandbox**: Uses **SymPy** to verify asymptotic flatness ($r \to \infty$) and evaluate energy density invariants before human review.
-* **Vector Novelty Gating**: Cosine distance screening ($\text{similarity} < 0.85$) against verified discoveries and logged failures prevents redundant research loops.
-* **Quantitative Peer-Review Scorecard**: Weighted numerical thresholds reject models that fail conservation bounds or lack testability.
-* **Preprint Synthesis**: Accepted discoveries are compiled directly into compile-ready academic LaTeX manuscripts (`.tex`).
+- **Adversarial Red-Teaming**: Hypotheses must supply an empirical **Kill Condition** tested by `breaker_ai`.
+- **Symbolic Tensor & Limit Sandbox**: Uses **SymPy** to verify asymptotic flatness ($r \to \infty$) and evaluate energy density invariants before human review.
+- **Vector Novelty Gating**: Cosine distance screening ($\text{similarity} < 0.85$) against verified discoveries and logged failures prevents redundant research loops.
+- **Quantitative Peer-Review Scorecard**: Weighted numerical thresholds reject models that fail conservation bounds or lack testability.
+- **Preprint Synthesis**: Accepted discoveries are compiled directly into compile-ready academic LaTeX manuscripts (`.tex`).
 
 ---
 
@@ -63,9 +64,9 @@ Most LLM-based research frameworks default to plausible-sounding speculation wit
      │   6. Judge AI scores 4-pillar quantitative JSON rubric          │
      └────────────────────────────────┬────────────────────────────────┘
                                       │
-                     ┌────────────────┴────────────────┐
-                     ▼                                 ▼
-             [If REJECTED]                      [If ACCEPTED]
+                      ┌────────────────┴────────────────┐
+                      ▼                                 ▼
+              [If REJECTED]                     [If ACCEPTED]
      Logged to failed_hypotheses.md         1. Written to discoveries.md
      to block duplicate cyclic loops        2. Auto-triggers paper_drafter.py
                                                to produce publication LaTeX
@@ -143,7 +144,70 @@ Discovery_AI/
 
 ---
 
-## 🚀 Quickstart
+## ⚡ Running on Google Colab (Free GPU)
+
+Run Discovery_AI autonomously with GPU acceleration (T4/V100/A100) on Google Colab:
+
+1. **Set Runtime**: Go to **Runtime** → **Change runtime type** → select **T4 GPU** → **Save**.
+2. **Execute Setup & Runner Cells**:
+
+```python
+# 1. Mount Google Drive for persistent memory & preprints
+from google.colab import drive
+import os
+drive.mount('/content/drive')
+WORKSPACE = "/content/drive/MyDrive/Discovery_AI_Workspace"
+os.makedirs(WORKSPACE, exist_ok=True)
+```
+
+```bash
+# 2. Clone repo and install requirements
+!git clone https://github.com/BaapOfCoding699/Discovery_AI.git /content/Discovery_AI
+%cd /content/Discovery_AI
+!pip install -q chromadb pypdf sentence-transformers ollama sympy numpy
+```
+
+```python
+# 3. Start Ollama background daemon
+import subprocess, time
+!curl -fsSL https://ollama.com/install.sh | sh
+ollama_proc = subprocess.Popen(["ollama", "serve"])
+time.sleep(5)
+!ollama --version
+```
+
+```bash
+# 4. Pull base model and build custom agents
+!ollama pull llama3:8b
+
+!ollama create director_ai  -f models/director_ai/Modelfile
+!ollama create builder_ai   -f models/builder_ai/Modelfile
+!ollama create breaker_ai   -f models/breaker_ai/Modelfile
+!ollama create judge_ai     -f models/judge_ai/Modelfile
+!ollama create scholar_ai   -f models/scholar_ai/Modelfile
+!ollama create pattern_ai   -f models/pattern_ai/Modelfile
+!ollama create analogist_ai -f models/analogist_ai/Modelfile
+!ollama create reasoner_ai  -f models/reasoner_ai/Modelfile
+```
+
+```bash
+# 5. Index literature vault (optional if vault/papers has PDFs)
+!python rag/rag_index.py
+
+# 6. Launch autonomous research engine
+!python -m runner.autonomous_director
+```
+
+```python
+# 7. Backup outputs to Google Drive
+!cp -r /content/Discovery_AI/memory/* /content/drive/MyDrive/Discovery_AI_Workspace/
+!cp -r /content/Discovery_AI/vault/drafts/* /content/drive/MyDrive/Discovery_AI_Workspace/ 2>/dev/null || true
+print("[+] Backed up discoveries, logs, and preprints to Drive.")
+```
+
+---
+
+## 🚀 Quickstart (Local)
 
 ### 1. Installation
 
@@ -170,7 +234,9 @@ ollama create builder_ai   -f models/builder_ai/Modelfile
 ollama create breaker_ai   -f models/breaker_ai/Modelfile
 ollama create judge_ai     -f models/judge_ai/Modelfile
 ollama create scholar_ai   -f models/scholar_ai/Modelfile
+ollama create pattern_ai   -f models/pattern_ai/Modelfile
 ollama create analogist_ai -f models/analogist_ai/Modelfile
+ollama create reasoner_ai  -f models/reasoner_ai/Modelfile
 ```
 
 ### 3. Ingest Scientific Literature
