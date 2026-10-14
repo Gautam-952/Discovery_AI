@@ -10,6 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(BASE_DIR))
 
 from runner.shared import query_model, read_memory, update_memory
+from runner.novelty_filter import check_hypothesis_novelty
 
 VALID_RUNNERS = {
     "fast_runner": "runner/fast_runner.py",
@@ -127,6 +128,36 @@ def run_loop(max_cycles: int = 5, sleep_interval: int = 2):
         try:
             context = load_research_context()
             decision = decide_next_step(context)
+            
+            target_hypothesis = decision.get("target_hypothesis", "")
+
+            # ----------------------------------------------------
+            # Novelty & Redundancy Gate
+            # ----------------------------------------------------
+            print("[*] Checking novelty against existing discoveries and failures...")
+            novelty = check_hypothesis_novelty(target_hypothesis, threshold=0.85)
+
+            if not novelty.get("is_novel", True):
+                sim = novelty.get("max_similarity", 0.0)
+                snippet = novelty.get("matched_snippet", "")
+                print(f"[!] Redundant target detected (Similarity: {sim:.3f} >= 0.85).")
+                print(f"    Matched with prior entry snippet:\n    \"{snippet[:160]}...\"")
+                print("[*] Skipping heavy runner execution to avoid circular loops.")
+
+                # Record skipped attempt to session memory
+                update_memory(
+                    str(BASE_DIR / "memory" / "session_memory.md"),
+                    f"\n- **Cycle {cycle} Skipped (Redundant)**: `{target_hypothesis}` (Similarity: {sim:.3f})\n"
+                )
+
+                cycle += 1
+                if cycle <= max_cycles:
+                    time.sleep(1)
+                continue
+
+            print(f"[+] Target is novel (Similarity: {novelty.get('max_similarity', 0.0):.3f} < 0.85). Proceeding.")
+            # ----------------------------------------------------
+
             execute_triage_decision(decision)
             
             # Log state update to session memory
