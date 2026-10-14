@@ -75,6 +75,9 @@ Examples:
 * symbols + mathematics
 * consciousness + information theory
 
+### Empirical Falsifiability Requirement
+- Ensure the hypothesis explicitly states its refutation condition: what exact measurement, mathematical breakdown, or empirical observation would conclusively prove this mechanism false.
+
 ### Abstraction
 
 Remove surface details and compare structure.

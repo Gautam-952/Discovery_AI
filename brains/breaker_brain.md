@@ -69,6 +69,10 @@ Rank severity of weaknesses.
 
 Use these attack methods:
 
+### Falsifiability Audit
+
+- In your critique, specifically check the Builder's proposed refutation conditions to determine whether known physics, conservation laws, or vault literature have already triggered and refuted them.
+
 ### Assumption Attack
 
 What must be true for this claim to work?
