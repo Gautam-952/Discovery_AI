@@ -18,7 +18,7 @@ client = OpenAI(
     api_key="hermes-local"
 )
 
-HERMES_MODEL_ID = "NousResearch/Hermes-3-Llama-3.1-8B"
+HERMES_MODEL_ID = "solidrust/Hermes-3-Llama-3.1-8B-AWQ"
 
 # --- Memory and File Utilities ---
 
