@@ -1,7 +1,7 @@
 """
 Novelty Filter & Redundancy Prevention Engine for Discovery_AI.
-Guards against circular exploration by computing embedding cosine distances 
-against memory/discoveries.md and memory/failed_hypotheses.md.
+Uses SentenceTransformer embeddings to compute cosine distances against
+memory/discoveries.md and memory/failed_hypotheses.md.
 """
 
 import re
@@ -11,6 +11,18 @@ import numpy as np
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+_embedder = None
+
+def get_embedder():
+    """Lazy loader for SentenceTransformer to conserve memory until invoked."""
+    global _embedder
+    if _embedder is None:
+        try:
+            from sentence_transformers import SentenceTransformer
+            _embedder = SentenceTransformer("all-MiniLM-L6-v2")
+        except Exception:
+            _embedder = None
+    return _embedder
 
 def extract_entries_from_file(file_path: Path) -> List[str]:
     """Splits markdown log files into distinct hypothesis entries."""
@@ -22,28 +34,19 @@ def extract_entries_from_file(file_path: Path) -> List[str]:
     except Exception:
         return []
 
-    # Split on markdown H2 or H3 headers
     entries = [e.strip() for e in re.split(r"\n#{2,3}\s+", content) if len(e.strip()) > 30]
     return entries
 
-
 def get_embedding(text: str) -> np.ndarray:
-    """Fetches an embedding vector using the local Ollama instance."""
+    """Fetches an embedding vector using SentenceTransformer."""
+    model = get_embedder()
+    if model is None:
+        return None
     try:
-        import ollama
-        response = ollama.embeddings(model="llama3:8b", prompt=text[:2000])
-        vec = np.array(response["embedding"], dtype=np.float32)
-        return vec
-    except Exception as e:
-        # Fallback to chromadb default embedding function if ollama call fails
-        try:
-            from chromadb.utils import embedding_functions
-            fn = embedding_functions.DefaultEmbeddingFunction()
-            emb = fn([text[:1000]])[0]
-            return np.array(emb, dtype=np.float32)
-        except Exception:
-            return None
-
+        vec = model.encode(text[:1500])
+        return np.array(vec, dtype=np.float32)
+    except Exception:
+        return None
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """Calculates cosine similarity between two 1D vectors."""
@@ -54,7 +57,6 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
     return float(np.dot(a, b) / (norm_a * norm_b))
-
 
 def check_hypothesis_novelty(
     candidate_hypothesis: str,
@@ -72,7 +74,6 @@ def check_hypothesis_novelty(
         extract_entries_from_file(failed_path)
     )
 
-    # If memory is empty, everything is novel
     if not historical_entries:
         return {
             "is_novel": True,
@@ -83,7 +84,6 @@ def check_hypothesis_novelty(
 
     candidate_vec = get_embedding(candidate_hypothesis)
     if candidate_vec is None:
-        # Safe bypass if embedding engine is momentarily offline
         return {
             "is_novel": True,
             "max_similarity": 0.0,
@@ -114,10 +114,3 @@ def check_hypothesis_novelty(
             else f"Redundancy detected: Cosine similarity {max_sim:.3f} >= threshold {threshold}."
         )
     }
-
-
-if __name__ == "__main__":
-    # Test execution
-    sample = "Entanglement entropy scaling across traversable wormhole horizons."
-    res = check_hypothesis_novelty(sample)
-    print("Novelty Filter Result:", res)
