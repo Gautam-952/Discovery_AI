@@ -1,183 +1,175 @@
 import json
-import os
+import time
 import subprocess
 import sys
-import time
+import os
+import shutil
+import signal
 from pathlib import Path
-
-# Ensure imports work from project root or runner directory
-BASE_DIR = Path(__file__).resolve().parent.parent
-sys.path.append(str(BASE_DIR))
-
-from runner.shared import query_model, read_memory, update_memory
+from runner.shared import query_model, read_memory, update_memory, BASE_DIR
 from runner.novelty_filter import check_hypothesis_novelty
 
-VALID_RUNNERS = {
-    "fast_runner": "runner/fast_runner.py",
-    "creative_runner": "runner/creative_runner.py",
-    "council_runner": "runner/council_runner.py",
-    "full_runner": "runner/full_runner.py"
-}
+DRIVE_WORKSPACE = Path("/content/drive/MyDrive/Discovery_AI_Workspace")
 
-def load_research_context() -> dict:
-    """Reads vault notes, persistent discoveries, and failed hypotheses."""
-    notes = []
+def sync_to_drive():
+    """Automated backup hook to persist memory and manuscripts to Google Drive."""
+    try:
+        DRIVE_WORKSPACE.mkdir(parents=True, exist_ok=True)
+        
+        # 1. Sync memory files
+        mem_dir = BASE_DIR / "memory"
+        if mem_dir.exists():
+            dest_mem = DRIVE_WORKSPACE / "memory"
+            dest_mem.mkdir(parents=True, exist_ok=True)
+            for item in mem_dir.glob("*"):
+                if item.is_file():
+                    shutil.copy2(item, dest_mem / item.name)
+
+        # 2. Sync generated preprints/drafts
+        drafts_dir = BASE_DIR / "vault" / "drafts"
+        if drafts_dir.exists():
+            dest_drafts = DRIVE_WORKSPACE / "drafts"
+            dest_drafts.mkdir(parents=True, exist_ok=True)
+            for item in drafts_dir.glob("*"):
+                if item.is_file():
+                    shutil.copy2(item, dest_drafts / item.name)
+
+        print("\n" + "=" * 60)
+        print(f"[+] [AUTO-SAVE] Successfully synced artifacts to {DRIVE_WORKSPACE}")
+        print("=" * 60 + "\n")
+    except Exception as e:
+        print(f"[!] [AUTO-SAVE ERROR] Failed to sync to Drive: {e}")
+
+def emergency_exit_handler(signum, frame):
+    """Saves everything immediately if Colab sends a termination signal."""
+    print("\n[!] Received termination signal. Running final emergency backup to Drive...")
+    sync_to_drive()
+    sys.exit(0)
+
+# Register termination handlers
+signal.signal(signal.SIGINT, emergency_exit_handler)
+signal.signal(signal.SIGTERM, emergency_exit_handler)
+
+def tail_text(text: str, max_chars: int = 1500) -> str:
+    if len(text) <= max_chars:
+        return text
+    return "... [truncated] ...\n" + text[-max_chars:]
+
+def run_director_cycle(cycle_num: int):
+    print(f"\n{'='*25} Cycle {cycle_num} {'='*25}")
+    
+    # 1. Load active memory state
+    discoveries = tail_text(read_memory(str(BASE_DIR / "memory" / "discoveries.md")), 1200)
+    failed = tail_text(read_memory(str(BASE_DIR / "memory" / "failed_hypotheses.md")), 1200)
+    session_mem = tail_text(read_memory(str(BASE_DIR / "memory" / "session_memory.md")), 800)
+    
     notes_dir = BASE_DIR / "vault" / "notes"
+    notes_summary = ""
     if notes_dir.exists():
-        for note_file in notes_dir.glob("*.md"):
-            try:
-                with open(note_file, "r", encoding="utf-8") as f:
-                    notes.append(f"### File: {note_file.name}\n{f.read()}")
-            except Exception as e:
-                print(f"[!] Warning reading note {note_file.name}: {e}")
+        notes_files = list(notes_dir.glob("*.md"))[:3]
+        for nf in notes_files:
+            notes_summary += f"\nNote ({nf.name}):\n" + tail_text(read_memory(str(nf)), 400)
 
-    failed = read_memory(str(BASE_DIR / "memory" / "failed_hypotheses.md")) or "None logged yet."
-    discoveries = read_memory(str(BASE_DIR / "memory" / "discoveries.md")) or "None logged yet."
-    patterns = read_memory(str(BASE_DIR / "memory" / "patterns.md")) or "None logged yet."
+    prompt = f"""You are Director AI. Review the current state of theoretical research:
 
-    return {
-        "notes": "\n\n".join(notes) if notes else "No theory notes found.",
-        "failed": failed,
-        "discoveries": discoveries,
-        "patterns": patterns
-    }
+[RECENT DISCOVERIES]
+{discoveries if discoveries else 'None yet.'}
 
-def clean_json_response(raw_text: str) -> dict:
-    """Strips markdown code fence wrappers to ensure clean JSON parsing."""
-    cleaned = raw_text.strip()
-    if cleaned.startswith("```json"):
-        cleaned = cleaned[7:]
-    elif cleaned.startswith("```"):
-        cleaned = cleaned[3:]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
-    return json.loads(cleaned.strip())
+[RECENT FAILED HYPOTHESES / RED-TEAM LOGS]
+{failed if failed else 'None yet.'}
 
-def decide_next_step(context: dict) -> dict:
-    """Prompts director_ai to triage assumptions and pick the optimal execution runner."""
-    director_brain_path = BASE_DIR / "brains" / "director_brain.md"
-    brain_instructions = ""
-    if director_brain_path.exists():
-        with open(director_brain_path, "r", encoding="utf-8") as f:
-            brain_instructions = f.read()
+[RECENT SESSION MEMORY]
+{session_mem if session_mem else 'None yet.'}
 
-    prompt = f"""{brain_instructions}
+[RESEARCH NOTES]
+{notes_summary if notes_summary else 'None.'}
 
-=== CURRENT WORKING THEORIES & NOTES ===
-{context['notes'][:3000]}
+Select an unexamined theoretical gap or paradox in theoretical physics/quantum gravity.
+Choose the best runner pipeline: 'full_runner', 'council_runner', 'creative_runner', or 'fast_runner'.
 
-=== RECENT DETECTED PATTERNS ===
-{context['patterns'][:1000]}
-
-=== KNOWN FAILED HYPOTHESES ===
-{context['failed'][:1500]}
-
-=== CONFIRMED DISCOVERIES ===
-{context['discoveries'][:1500]}
-
-Evaluate the active theoretical assumptions and select the single next priority test.
-Provide your output strictly as a JSON object matching the specification.
-"""
+Respond ONLY with a valid JSON object matching this schema:
+{{
+  "action": "select",
+  "topic": "<Specific theoretical conjecture or paradox to investigate>",
+  "runner": "<full_runner|council_runner|creative_runner|fast_runner>",
+  "reasoning": "<Concise operational reasoning>"
+}}"""
 
     print("[*] Consulting Director AI for triage and pipeline selection...")
-    raw_response = query_model("director_ai", prompt)
+    raw_response = query_model("director_ai", prompt, options={"num_predict": 300})
     
+    cleaned = raw_response.strip()
+    if "```json" in cleaned:
+        cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+    elif "```" in cleaned:
+        cleaned = cleaned.split("```")[1].split("```")[0].strip()
+
     try:
-        decision = clean_json_response(raw_response)
+        decision = json.loads(cleaned)
     except Exception as e:
         print(f"[!] Error parsing Director output as JSON. Raw text:\n{raw_response}")
         raise e
 
-    return decision
+    topic = decision.get("topic", "").strip()
+    runner = decision.get("runner", "full_runner").strip()
+    reasoning = decision.get("reasoning", "").strip()
 
-def execute_triage_decision(decision: dict):
-    """Launches the runner chosen by the Director."""
-    runner_key = decision.get("runner", "").strip().lower()
-    hypothesis = decision.get("target_hypothesis", "Theoretical verification")
-    reasoning = decision.get("reasoning", "No reasoning provided.")
-    priority = decision.get("priority", 3)
+    print(f"[+] Director Decision:")
+    print(f"    - Topic: {topic}")
+    print(f"    - Runner: {runner}")
+    print(f"    - Reasoning: {reasoning}")
 
-    if runner_key not in VALID_RUNNERS:
-        print(f"[!] Unrecognized runner '{runner_key}', falling back to fast_runner.")
-        runner_key = "fast_runner"
-
-    target_script = BASE_DIR / VALID_RUNNERS[runner_key]
-
-    print("\n" + "=" * 60)
-    print(f"[*] Autonomous Director Decision:")
-    print(f"    - Target Hypothesis: {hypothesis}")
-    print(f"    - Selected Runner  : {runner_key}.py (Priority: {priority})")
-    print(f"    - Strategy/Reason  : {reasoning}")
-    print("=" * 60 + "\n")
-
-    # Run the selected script as a subprocess passing the target hypothesis as a parameter
-    cmd = [sys.executable, str(target_script), "--topic", hypothesis]
+    # 2. Vector Novelty Check
+    print("[*] Evaluating hypothesis novelty against memory archives...")
+    novelty_eval = check_hypothesis_novelty(topic, threshold=0.85)
     
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"[!] Error executing {runner_key}.py: {e}")
-    except Exception as e:
-        print(f"[!] Unexpected error during execution: {e}")
+    if not novelty_eval.get("is_novel", True):
+        print(f"[!] Novelty Check FAILED: {novelty_eval.get('reason')}")
+        update_memory(
+            str(BASE_DIR / "memory" / "failed_hypotheses.md"),
+            f"\n### Rejected Redundant Proposal: {topic}\n- Similarity: {novelty_eval.get('max_similarity')}\n- Reason: Redundancy threshold exceeded.\n"
+        )
+        return False
 
-def run_loop(max_cycles: int = 5, sleep_interval: int = 2):
-    """Main execution loop for continuous autonomous research."""
+    print(f"[+] Novelty Check PASSED: Max similarity is {novelty_eval.get('max_similarity', 0.0)}")
+
+    # 3. Subprocess Execution
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(BASE_DIR) + (":" + env["PYTHONPATH"] if "PYTHONPATH" in env else "")
+
+    module_name = f"runner.{runner}"
+    print(f"[*] Executing pipeline via `{module_name}`...")
+    
+    cmd = [sys.executable, "-m", module_name, "--topic", topic]
+    res = subprocess.run(cmd, cwd=str(BASE_DIR), env=env)
+    
+    if res.returncode == 0:
+        print(f"[+] Cycle {cycle_num} execution successful.")
+        return True
+    else:
+        print(f"[!] Subprocess `{module_name}` exited with code {res.returncode}.")
+        return False
+
+def main():
+    print("[*] Starting Fully Infinite Autonomous Director.")
+    print("[*] Auto-saving to Google Drive every 5 cycles.")
+    print("[*] Running continuously until Colab runtime disconnects or limit is reached...\n")
+    
     cycle = 1
-    while cycle <= max_cycles:
-        print(f"\n>>> Autonomous Research Cycle {cycle}/{max_cycles} <<<")
+
+    while True:
         try:
-            context = load_research_context()
-            decision = decide_next_step(context)
-            
-            target_hypothesis = decision.get("target_hypothesis", "")
-
-            # ----------------------------------------------------
-            # Novelty & Redundancy Gate
-            # ----------------------------------------------------
-            print("[*] Checking novelty against existing discoveries and failures...")
-            novelty = check_hypothesis_novelty(target_hypothesis, threshold=0.85)
-
-            if not novelty.get("is_novel", True):
-                sim = novelty.get("max_similarity", 0.0)
-                snippet = novelty.get("matched_snippet", "")
-                print(f"[!] Redundant target detected (Similarity: {sim:.3f} >= 0.85).")
-                print(f"    Matched with prior entry snippet:\n    \"{snippet[:160]}...\"")
-                print("[*] Skipping heavy runner execution to avoid circular loops.")
-
-                # Record skipped attempt to session memory
-                update_memory(
-                    str(BASE_DIR / "memory" / "session_memory.md"),
-                    f"\n- **Cycle {cycle} Skipped (Redundant)**: `{target_hypothesis}` (Similarity: {sim:.3f})\n"
-                )
-
-                cycle += 1
-                if cycle <= max_cycles:
-                    time.sleep(1)
-                continue
-
-            print(f"[+] Target is novel (Similarity: {novelty.get('max_similarity', 0.0):.3f} < 0.85). Proceeding.")
-            # ----------------------------------------------------
-
-            execute_triage_decision(decision)
-            
-            # Log state update to session memory
-            log_entry = (
-                f"\n### Cycle {cycle} Execution\n"
-                f"- **Target**: {decision.get('target_hypothesis')}\n"
-                f"- **Pipeline**: `{decision.get('runner')}.py`\n"
-                f"- **Reasoning**: {decision.get('reasoning')}\n"
-            )
-            update_memory(str(BASE_DIR / "memory" / "session_memory.md"), log_entry)
-
+            run_director_cycle(cycle)
         except Exception as e:
-            print(f"[!] Cycle {cycle} failed: {e}")
+            print(f"[!] Cycle {cycle} error: {e}. Moving to next cycle in 5s...")
+            time.sleep(5)
+
+        # Auto-save to Google Drive after every 5 cycles
+        if cycle % 5 == 0:
+            sync_to_drive()
 
         cycle += 1
-        if cycle <= max_cycles:
-            print(f"[*] Pausing for {sleep_interval}s before next cycle...")
-            time.sleep(sleep_interval)
-
-    print("\n[*] Autonomous director session finished.")
+        time.sleep(2)
 
 if __name__ == "__main__":
-    run_loop(max_cycles=5)
+    main()

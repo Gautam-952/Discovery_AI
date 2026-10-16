@@ -1,84 +1,62 @@
-"""
-Math and Physics Verification Sandbox for Discovery_AI.
-Uses SymPy for symbolic algebra, tensor checks, and boundary limits.
-"""
-
+import re
 import sympy as sp
-from typing import Dict, Any, List
+from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
 
-def check_asymptotic_flatness(metric_expr_str: str, radial_var_str: str = "r") -> Dict[str, Any]:
-    """
-    Checks if a metric component or function approaches Minkowski flat space
-    as the radial coordinate r -> infinity.
-    Example input: "1 - 2*M/r" -> should approach 1.
-    """
-    try:
-        r = sp.symbols(radial_var_str, positive=True, real=True)
-        expr = sp.sympify(metric_expr_str)
-        limit_inf = sp.limit(expr, r, sp.oo)
-        is_flat = limit_inf in (1, 0, -1)
-        
-        return {
-            "status": "PASS" if is_flat else "WARN",
-            "limit_r_oo": str(limit_inf),
-            "asymptotically_flat": bool(is_flat),
-            "message": f"Limit as {radial_var_str}->oo is {limit_inf}"
-        }
-    except Exception as e:
-        return {
-            "status": "ERROR",
-            "error": str(e)
-        }
+transformations = standard_transformations + (implicit_multiplication_application,)
 
-def check_energy_condition_scalar(t_00_str: str, var_dict: Dict[str, float] = None) -> Dict[str, Any]:
-    """
-    Checks sign of energy density expressions (e.g., T_00 or effective rho).
-    Useful for testing negative energy regimes in Casimir or wormhole regions.
-    """
-    try:
-        expr = sp.sympify(t_00_str)
-        if var_dict:
-            val = expr.subs(var_dict).evalf()
-            is_negative = float(val) < 0
-            return {
-                "status": "PASS",
-                "evaluated_value": float(val),
-                "is_negative_energy": is_negative,
-                "message": "Exotic/Negative energy density detected" if is_negative else "Standard positive energy"
-            }
-        return {
-            "status": "PASS",
-            "simplified_expression": str(sp.simplify(expr))
-        }
-    except Exception as e:
-        return {
-            "status": "ERROR",
-            "error": str(e)
-        }
+def clean_latex_to_sympy(latex_str: str) -> str:
+    s = latex_str.strip()
+    s = s.replace(r"\frac", " ").replace(r"\ln", "log").replace(r"\log", "log")
+    s = s.replace(r"\mu", "mu").replace(r"\hbar", "hbar").replace(r"\beta", "beta")
+    s = s.replace(r"\alpha", "alpha").replace(r"\sum", "sum")
+    s = re.sub(r'\{([^{}]+)\}', r'(\1)', s)
+    s = re.sub(r'\\([a-zA-Z]+)', r'\1', s)
+    s = s.replace("^", "**")
+    return s
 
-def verify_hypothesis_equations(equations: List[str]) -> List[Dict[str, Any]]:
-    """
-    Runs basic dimensional and algebraic sanity checks on candidate equations.
-    """
+def verify_hypothesis_equations(equations: list) -> list:
     results = []
-    for eq in equations:
+    for raw_eq in equations:
+        cleaned = clean_latex_to_sympy(raw_eq)
+        # If chained equality a = b = c, split and check the first relation
+        parts = cleaned.split("=")
+        if len(parts) >= 2:
+            test_eq = f"{parts[0].strip()} - ({parts[-1].strip()})"
+        else:
+            test_eq = cleaned
+
         try:
-            parsed = sp.sympify(eq)
+            parsed = parse_expr(test_eq, transformations=transformations)
+            simplified = sp.simplify(parsed)
             results.append({
-                "equation": eq,
+                "equation": raw_eq,
                 "valid_syntax": True,
-                "free_symbols": [str(s) for s in parsed.free_symbols],
-                "simplified": str(sp.simplify(parsed))
+                "simplified": str(simplified)
             })
         except Exception as e:
             results.append({
-                "equation": eq,
+                "equation": raw_eq,
                 "valid_syntax": False,
                 "error": str(e)
             })
     return results
 
-if __name__ == "__main__":
-    # Self-test
-    test_metric = "1 - 2*M/r"
-    print("Testing asymptotic flatness:", check_asymptotic_flatness(test_metric, "r"))
+def check_asymptotic_flatness(metric_comp_str: str, radial_var_str: str = "r") -> dict:
+    try:
+        r = sp.Symbol(radial_var_str, positive=True, real=True)
+        M = sp.Symbol("M", positive=True, real=True)
+        cleaned = clean_latex_to_sympy(metric_comp_str)
+        if "=" in cleaned:
+            cleaned = cleaned.split("=")[-1].strip()
+        expr = parse_expr(cleaned, transformations=transformations)
+        lim_val = sp.limit(expr, r, sp.oo)
+        return {
+            "status": "PASSED" if lim_val != sp.nan else "FAILED",
+            "limit_r_oo": str(lim_val),
+            "message": f"lim r->oo evaluates to {lim_val}"
+        }
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "message": str(e)
+        }

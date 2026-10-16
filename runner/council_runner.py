@@ -1,179 +1,52 @@
-import requests
-import time
-from pathlib import Path
+import sys
+import argparse
+from runner.shared import query_model, print_section, update_memory, BASE_DIR
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+COUNCIL_MEMBERS = [
+    ("builder_ai", "Construct a testable physical conjecture, symmetry group, or equation for:"),
+    ("breaker_ai", "Audit the proposal for hidden singularities, causality breaches, and unitary violations:"),
+    ("analogist_ai", "Bridge this with dualities or isomorphic mechanics from condensed matter or thermodynamics:"),
+    ("reasoner_ai", "Deduce step-by-step observable consequences and falsification thresholds:")
+]
 
-BASE_DIR = Path("D:/Discovery_AI")
-MEMORY_DIR = BASE_DIR / "memory"
+def run_council(prompt: str):
+    print(f"\n[+] Convening Council on Topic: {prompt}\n")
+    session_log = f"\n\n## Council Session: {prompt}\n"
 
-MODELS = {
-    "Scholar": "scholar_ai",
-    "Breaker": "breaker_ai",
-    "Builder": "builder_ai",
-    "Pattern": "pattern_ai",
-    "Reasoner": "reasoner_ai",
-    "Judge": "judge_ai",
-}
+    for agent, instruction in COUNCIL_MEMBERS:
+        agent_name = agent.replace("_ai", "").upper()
+        print(f"[*] Consulting {agent_name}...")
+        
+        full_prompt = f"{instruction}\nTopic: {prompt}\n\nContext so far:\n{session_log}"
+        response = query_model(agent, full_prompt)
+        
+        print_section(f"{agent_name} RESPONSE", response)
+        session_log += f"\n### {agent_name}\n{response}\n"
 
-OPTIONS = {
-    "num_predict": 250,
-    "temperature": 0.3,
-    "top_p": 0.8,
-    "repeat_penalty": 1.15,
-}
-
-def load_memory(filename):
-    path = MEMORY_DIR / filename
-    if path.exists():
-        return path.read_text(encoding="utf-8")
-    return ""
-
-def ask_model(role, model, prompt):
-    print(f"\nRunning {role}...")
-    start = time.time()
-
-    response = requests.post(
-        OLLAMA_URL,
-        json={
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": OPTIONS,
-        },
-        timeout=None,
-    )
-
-    response.raise_for_status()
-    text = response.json()["response"].strip()
-
-    print(f"{role} done in {round(time.time() - start, 1)}s")
-    return text
-
-def print_section(title, text):
-    print("\n" + "=" * 18 + f" {title} " + "=" * 18)
-    print(text)
+    # Save transcript into session memory
+    update_memory(str(BASE_DIR / "memory" / "session_memory.md"), session_log)
+    print("\n[+] Council deliberations concluded and logged to memory/session_memory.md.")
 
 def main():
-    question = input("\nAsk Discovery Council: ").strip()
+    parser = argparse.ArgumentParser(description="Discovery AI Council Runner")
+    parser.add_argument("--topic", type=str, default=None, help="Research topic or paradox")
+    args, unknown = parser.parse_known_args()
 
-    global_memory = load_memory("global_memory.md")
-    judge_memory = load_memory("judge_memory.md")
+    topic = args.topic
+    if not topic:
+        if len(sys.argv) > 1 and not sys.argv[1].startswith("--"):
+            topic = " ".join(sys.argv[1:])
+        else:
+            # Fallback if invoked manually without flags
+            try:
+                topic = input("Ask Discovery Council: ").strip()
+            except EOFError:
+                topic = "The emergence of spacetime in quantum gravity"
 
-    scholar = ask_model("Scholar", MODELS["Scholar"], f"""
-Question:
-{question}
-
-Task:
-Give strongest accepted knowledge.
-Keep concise.
-""")
-
-    breaker = ask_model("Breaker", MODELS["Breaker"], f"""
-Question:
-{question}
-
-Scholar Output:
-{scholar}
-
-Task:
-Find assumptions, weak points, and boundary conditions.
-Keep concise.
-""")
-
-    builder = ask_model("Builder", MODELS["Builder"], f"""
-Question:
-{question}
-
-Scholar Output:
-{scholar}
-
-Breaker Output:
-{breaker}
-
-Task:
-Create alternative hypotheses or new explanations.
-Keep concise.
-""")
-
-    pattern = ask_model("Pattern", MODELS["Pattern"], f"""
-Question:
-{question}
-
-Scholar Output:
-{scholar}
-
-Breaker Output:
-{breaker}
-
-Builder Output:
-{builder}
-
-Task:
-Find hidden structures, patterns, analogies, or repeated principles.
-Keep concise.
-""")
-
-    reasoner = ask_model("Reasoner", MODELS["Reasoner"], f"""
-Question:
-{question}
-
-Scholar Output:
-{scholar}
-
-Breaker Output:
-{breaker}
-
-Builder Output:
-{builder}
-
-Pattern Output:
-{pattern}
-
-Task:
-Verify reasoning quality, hidden assumptions, evidence strength, and confidence reliability.
-Keep concise.
-""")
-
-    judge = ask_model("Judge", MODELS["Judge"], f"""
-Long-Term Memory:
-
-GLOBAL MEMORY:
-{global_memory}
-
-JUDGE MEMORY:
-{judge_memory}
-
-Question:
-{question}
-
-Scholar Output:
-{scholar}
-
-Breaker Output:
-{breaker}
-
-Builder Output:
-{builder}
-
-Pattern Output:
-{pattern}
-
-Reasoner Output:
-{reasoner}
-
-Task:
-Use memory plus all agent outputs.
-Give final verdict and final answer.
-Be balanced, concise, and decisive.
-""")
-
-    print_section("SCHOLAR", scholar)
-    print_section("BREAKER", breaker)
-    print_section("BUILDER", builder)
-    print_section("PATTERN", pattern)
-    print_section("REASONER", reasoner)
-    print_section("FINAL JUDGE", judge)
+    if topic:
+        run_council(topic)
+    else:
+        print("[!] No topic provided.")
 
 if __name__ == "__main__":
     main()
