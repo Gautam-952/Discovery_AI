@@ -1,5 +1,12 @@
+# Large binaries and archives
+*.zip
+*.tar.gz
+knowledge_base/*.zip
+
+# Vector database
+rag_db/
+
+# Python & Colab temp
+.ipynb_checkpoints/
 __pycache__/
 *.pyc
-*.pyo
-.ipynb_checkpoints/
-vllm.log
