@@ -1,12 +1,12 @@
-# Large binaries and archives
+# Colab checkpoints & Python caches
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+
+# Heavy archives & binary files
 *.zip
 *.tar.gz
 knowledge_base/*.zip
 
-# Vector database
+# Vector database cache
 rag_db/
-
-# Python & Colab temp
-.ipynb_checkpoints/
-__pycache__/
-*.pyc
